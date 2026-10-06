@@ -1,0 +1,10 @@
+{
+  "origin": "https://latin1.example",
+  "pages": {
+    "/": {
+      "status": 200,
+      "contentType": "text/html",
+      "file": "index.html"
+    }
+  }
+}

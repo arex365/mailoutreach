@@ -1,0 +1,11 @@
+# Windows scripts must keep Windows line endings (cmd.exe misreads LF-only batch files).
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Never change these.
+*.exe binary
+*.db binary
+*.tgz binary
+*.xlsx binary
+*.xls binary

@@ -1,0 +1,8 @@
+{
+  "origin": "https://blocked.example",
+  "headers": { "cf-mitigated": "challenge", "server": "cloudflare" },
+  "pages": {
+    "/robots.txt": { "status": 403, "contentType": "text/html; charset=UTF-8", "file": "challenge.html" },
+    "/": { "status": 403, "contentType": "text/html; charset=UTF-8", "file": "challenge.html" }
+  }
+}

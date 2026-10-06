@@ -1,0 +1,11 @@
+{
+  "origin": "https://www.figuren-werkstatt.example",
+  "pages": {
+    "/robots.txt": { "status": 200, "contentType": "text/plain; charset=utf-8", "file": "robots.txt" },
+    "/": { "status": 200, "contentType": "text/html; charset=utf-8", "file": "index.html" },
+    "/galerie": { "status": 200, "contentType": "text/html; charset=utf-8", "file": "galerie.html" },
+    "/ueber-uns": { "status": 200, "contentType": "text/html; charset=utf-8", "file": "ueber-uns.html" },
+    "/impressum": { "status": 200, "contentType": "text/html; charset=utf-8", "file": "impressum.html" },
+    "/kontakt": { "status": 200, "contentType": "text/html; charset=utf-8", "file": "kontakt.html" }
+  }
+}

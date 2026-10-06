@@ -1,0 +1,8 @@
+{
+  "origin": "https://crawl-delay.example",
+  "pages": {
+    "/robots.txt": { "status": 200, "contentType": "text/plain", "body": "User-agent: *\nCrawl-delay: 20\nDisallow: /private/\n" },
+    "/": { "status": 200, "contentType": "text/html; charset=utf-8", "file": "index.html" },
+    "/gallery": { "status": 200, "contentType": "text/html; charset=utf-8", "file": "gallery.html" }
+  }
+}

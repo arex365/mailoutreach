@@ -1,0 +1,17 @@
+{
+  "origin": "https://www.redirect-www.example",
+  "pages": {
+    "/robots.txt": { "status": 200, "contentType": "text/plain", "body": "User-agent: *\nDisallow: /admin/\n" },
+    "/": { "status": 200, "contentType": "text/html; charset=utf-8", "file": "index.html" }
+  },
+  "extraOrigins": {
+    "https://redirect-www.example": {
+      "pages": {
+        "/robots.txt": { "status": 200, "contentType": "text/plain", "body": "User-agent: *\nDisallow:\n" }
+      },
+      "redirects": {
+        "/": { "to": "https://www.redirect-www.example/", "status": 301 }
+      }
+    }
+  }
+}

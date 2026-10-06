@@ -1,0 +1,6 @@
+{
+  "origin": "https://parked-domain.example",
+  "pages": {
+    "/": { "status": 200, "contentType": "text/html; charset=utf-8", "file": "index.html" }
+  }
+}

@@ -1,0 +1,66 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+.codegraph/
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# outreach app: runtime data, build output, logs (never commit the database or .env)
+/dist/
+/run/
+/logs/
+/backups/
+/data/*.db
+/data/*.db-*
+/data/*.db.instance
+/data/.node-abi
+/data/RESTORED
+/data/test/
+/test-results/
+/playwright-report/
+/src/generated/
+
+# local scratch files and screenshots (may hold keys or account details)
+/New Text Document*.txt
+/mailgun_*.png
+
+# editor / OS
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini

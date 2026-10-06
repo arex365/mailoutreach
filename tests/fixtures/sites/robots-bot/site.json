@@ -1,0 +1,11 @@
+{
+  "origin": "https://robots-bot.example",
+  "pages": {
+    "/robots.txt": {
+      "status": 200,
+      "contentType": "text/plain",
+      "body": "User-agent: PolygonParadiseBot\nDisallow: /\n\nUser-agent: *\nCrawl-delay: 20\n"
+    },
+    "/": { "status": 200, "contentType": "text/html; charset=utf-8", "file": "index.html" }
+  }
+}

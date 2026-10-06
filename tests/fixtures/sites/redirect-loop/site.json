@@ -1,0 +1,9 @@
+{
+  "origin": "https://redirect-loop.example",
+  "pages": {},
+  "redirects": {
+    "/": { "to": "/a", "status": 302 },
+    "/a": { "to": "/b", "status": 302 },
+    "/b": { "to": "/a", "status": 302 }
+  }
+}

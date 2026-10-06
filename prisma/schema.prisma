@@ -1,0 +1,1029 @@
+// Polygon Paradise Outreach — database schema.
+// SQLite today, written to stay portable to Postgres: integer ids, Prisma enums,
+// JSON only for opaque blobs, no scalar lists, lowercase "Norm" columns for search.
+// See PLAN.md Part B, section B4.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// ───────────────────────────── Enums ─────────────────────────────
+
+enum Role {
+  OWNER
+  MEMBER
+}
+
+enum CompanyStatus {
+  NOT_CONTACTED
+  CONTACTED
+  REPLIED
+  CLIENT
+  NOT_INTERESTED
+  DO_NOT_CONTACT
+}
+
+enum Priority {
+  HIGH
+  NORMAL
+  LOW
+}
+
+enum VerificationStatus {
+  VALID
+  INVALID
+  RISKY
+  CATCH_ALL
+  UNKNOWN
+  DO_NOT_SEND
+}
+
+enum Risk {
+  LOW
+  MEDIUM
+  HIGH
+  UNKNOWN
+}
+
+enum SuppressionReason {
+  BOUNCED
+  COMPLAINED
+  UNSUBSCRIBED
+  MANUAL
+  INVALID
+}
+
+enum AccessLinkPurpose {
+  INVITE
+  RESET
+}
+
+enum CampaignStatus {
+  DRAFT
+  SCHEDULED
+  RUNNING
+  PAUSED
+  FINISHED
+  CANCELLED
+}
+
+enum SendMode {
+  DRY_RUN
+  TEST
+  LIVE
+}
+
+enum RecipientState {
+  PENDING
+  SCHEDULED
+  WAITING
+  HELD
+  RECHECK
+  FINISHED
+  STOPPED
+  EXCLUDED
+}
+
+enum SendStatus {
+  QUEUED
+  SENDING
+  SENT
+  FAILED
+  CANCELLED
+  SKIPPED
+  UNKNOWN
+  UNCONFIRMED
+}
+
+enum EventSource {
+  WEBHOOK
+  LOGS
+  SIMULATED
+}
+
+enum InboundSource {
+  NOTIFY
+  CATCHUP
+  SIMULATED
+}
+
+enum InboundKind {
+  REPLY
+  AUTO_REPLY
+  BOUNCE_NOTICE
+  POSSIBLE_REPLY
+  UNLINKED
+  /// A reply to a test email (the reply test or "Send me a test"): recorded, never changes anyone (M4-DESIGN §3.5).
+  TEST_REPLY
+}
+
+enum JobStatus {
+  QUEUED
+  RUNNING
+  DONE
+  FAILED
+  CANCELLED
+}
+
+enum AiDraftStatus {
+  QUEUED
+  FETCHING
+  DRAFTING
+  READY
+  NO_LINE
+  FAILED
+  APPROVED
+  REJECTED
+}
+
+enum ImportStatus {
+  UPLOADED
+  MAPPED
+  COMMITTING
+  DONE
+  FAILED
+  CANCELLED
+}
+
+enum BackupKind {
+  AUTO
+  MANUAL
+  PRE_UPDATE
+  PRE_RESTORE
+}
+
+// ───────────────────────── Users and access ─────────────────────────
+
+model User {
+  id                Int       @id @default(autoincrement())
+  email             String    @unique // login, stored lowercase
+  name              String
+  role              Role      @default(MEMBER)
+  passwordHash      String?
+  active            Boolean   @default(true)
+  senderDisplayName String?
+  replyInbox        String?
+  signature         String    @default("")
+  timeZone          String    @default("Asia/Karachi")
+  dailyCap          Int?
+  notifyPrefs       Json?
+  lastLoginAt       DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  sessions        Session[]
+  accessLinks     AccessLink[]        @relation("AccessLinkUser")
+  senderAddresses SenderAddress[]
+  notifications   Notification[]
+  activity        ActivityLog[]
+  campaignsSent   Campaign[]          @relation("CampaignSender")
+  campaignsMade   Campaign[]          @relation("CampaignCreator")
+  firstContacted  Company[]           @relation("FirstContactedBy")
+  lastEmailed     Company[]           @relation("CompanyLastEmailedBy")
+  personLastEmail Person[]            @relation("PersonLastEmailedBy")
+  outbound        OutboundEmail[]
+  importSessions  ImportSession[]
+  lists           List[]
+}
+
+model SendingDomain {
+  id              Int       @id @default(autoincrement())
+  name            String    @unique
+  region          String // "EU" | "US"
+  active          Boolean   @default(true)
+  lastLiveSendAt  DateTime?
+  /// Mailgun ids of the app's own catch-all and dmarc@ routes for this domain (descriptions "outreach-app:…").
+  catchAllRouteId String?
+  dmarcRouteId    String?
+  createdAt       DateTime  @default(now())
+
+  senderAddresses SenderAddress[]
+}
+
+model SenderAddress {
+  id             Int       @id @default(autoincrement())
+  userId         Int
+  domainId       Int
+  localPart      String
+  address        String    @unique
+  mailgunRouteId String?
+  routeStatus    String? // "pending" | "ok" | "mismatch" | "error"
+  /// The inbox the route forwards to, as last synced (the user's reply inbox, or the Owner's for a switched-off user).
+  forwardTo      String?
+  routeCheckedAt DateTime?
+  routeError     String?
+  retiredAt      DateTime?
+  createdAt      DateTime  @default(now())
+
+  user   User          @relation(fields: [userId], references: [id])
+  domain SendingDomain @relation(fields: [domainId], references: [id])
+
+  @@unique([domainId, localPart])
+  @@index([userId])
+}
+
+model AccessLink {
+  id          Int               @id @default(autoincrement())
+  userId      Int
+  purpose     AccessLinkPurpose
+  tokenHash   String            @unique
+  expiresAt   DateTime
+  usedAt      DateTime?
+  revokedAt   DateTime?
+  createdById Int?
+  createdAt   DateTime          @default(now())
+
+  user User @relation("AccessLinkUser", fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+model Session {
+  id         Int      @id @default(autoincrement())
+  tokenHash  String   @unique
+  userId     Int
+  createdAt  DateTime @default(now())
+  expiresAt  DateTime
+  lastSeenAt DateTime @default(now())
+  source     String?
+  userAgent  String?
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+model LoginAttempt {
+  id        Int      @id @default(autoincrement())
+  emailNorm String
+  sourceKey String
+  success   Boolean
+  at        DateTime @default(now())
+
+  @@index([emailNorm, at])
+  @@index([sourceKey, at])
+}
+
+// ─────────────────────── Settings, state, secrets ───────────────────────
+
+/// Owner-edited configuration (key → JSON).
+model Setting {
+  key         String   @id
+  value       Json
+  updatedAt   DateTime @updatedAt
+  updatedById Int?
+}
+
+/// Worker-owned state, updated with compare-and-set on `version`.
+model SystemState {
+  key       String   @id
+  value     Json
+  version   Int      @default(1)
+  updatedAt DateTime @updatedAt
+}
+
+/// Encrypted secrets (AES-256-GCM). Never returned to the browser.
+model Secret {
+  key         String   @id
+  ciphertext  String
+  last4       String
+  updatedAt   DateTime @updatedAt
+  updatedById Int?
+}
+
+// ─────────────────────── Companies, people, lists ───────────────────────
+
+model Company {
+  id                      Int           @id @default(autoincrement())
+  name                    String
+  nameNorm                String
+  website                 String?
+  domain                  String? // registrable domain; null for shared hosts
+  profileKey              String? // the account on a shared host (per-platform rules in src/core/shared-domains.ts), e.g. "etsy.com/shop/foominis"
+  country                 String? // ISO 3166-1 alpha-2
+  timeZone                String? // IANA
+  niche                   String?
+  priority                Priority      @default(NORMAL)
+  priorityRank            Int           @default(2) // HIGH=1, NORMAL=2, LOW=3 — for sorting
+  status                  CompanyStatus @default(NOT_CONTACTED)
+  notes                   String        @default("")
+  personalLine            String? // approved text only
+  personalLineSource      String? // "manual" | "ai" | "import"
+  personalLineUpdatedAt   DateTime?
+  personalLineUpdatedById Int?
+  instagram               String?
+  customFields            Json?
+  searchText              String        @default("")
+  firstContactedById      Int?
+  firstContactedAt        DateTime?
+  lastEmailedAt           DateTime?
+  lastEmailedById         Int?
+  lastEmailedCampaignId   Int?
+  lastEmailedStep         Int?
+  importedLastContactAt   DateTime?
+  /// max(lastEmailedAt, importedLastContactAt) — what the "Last emailed" column shows and sorts by.
+  lastContactAt           DateTime?
+  repliedAt               DateTime?
+  deletedAt               DateTime?
+  createdById             Int?
+  createdAt               DateTime      @default(now())
+  updatedAt               DateTime      @updatedAt
+
+  firstContactedBy User?                @relation("FirstContactedBy", fields: [firstContactedById], references: [id])
+  lastEmailedBy    User?                @relation("CompanyLastEmailedBy", fields: [lastEmailedById], references: [id])
+  people           Person[]
+  lists            CompanyList[]
+  tags             CompanyTag[]
+  recipients       CampaignRecipient[]
+  reservations     CompanyReservation[]
+
+  @@index([status])
+  @@index([domain])
+  @@index([profileKey])
+  @@index([lastEmailedAt])
+  @@index([lastContactAt])
+  @@index([country])
+  @@index([nameNorm])
+  @@index([deletedAt])
+  @@index([priorityRank])
+  @@index([niche])
+  @@index([createdAt])
+}
+
+model Person {
+  id                    Int                 @id @default(autoincrement())
+  companyId             Int
+  name                  String              @default("")
+  firstName             String?
+  role                  String?
+  email                 String?
+  emailNorm             String?             @unique
+  isGeneric             Boolean             @default(false)
+  verificationStatus    VerificationStatus?
+  verificationRisk      Risk?
+  verifiedAt            DateTime?
+  verificationProvider  String?
+  /// The last check said the address is a throwaway (disposable) one (M5-DESIGN §2.3). Cleared with the other check fields.
+  verificationDisposable Boolean            @default(false)
+  /// Checks in a row that said "unknown" (0 after any other result; M5-DESIGN §2.7). Cleared with the other check fields.
+  verificationUnknowns  Int                 @default(0)
+  personalLineOverride  String?
+  unsubscribedAt        DateTime?
+  bouncedAt             DateTime?
+  complainedAt          DateTime?
+  repliedAt             DateTime?
+  lastEmailedAt         DateTime?
+  lastEmailedById       Int?
+  lastEmailedCampaignId Int?
+  lastEmailedStep       Int?
+  notes                 String              @default("")
+  customFields          Json?
+  deletedAt             DateTime?
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+
+  company       Company             @relation(fields: [companyId], references: [id])
+  lastEmailedBy User?               @relation("PersonLastEmailedBy", fields: [lastEmailedById], references: [id])
+  recipients    CampaignRecipient[]
+
+  @@index([companyId])
+  @@index([deletedAt])
+}
+
+model List {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique
+  description String?
+  createdById Int?
+  createdAt   DateTime @default(now())
+
+  createdBy User?         @relation(fields: [createdById], references: [id])
+  companies CompanyList[]
+}
+
+model CompanyList {
+  companyId Int
+  listId    Int
+  addedAt   DateTime @default(now())
+  addedById Int?
+
+  company Company @relation(fields: [companyId], references: [id])
+  list    List    @relation(fields: [listId], references: [id], onDelete: Cascade)
+
+  @@id([companyId, listId])
+  @@index([listId, companyId])
+}
+
+model Tag {
+  id        Int          @id @default(autoincrement())
+  name      String       @unique
+  companies CompanyTag[]
+}
+
+model CompanyTag {
+  companyId Int
+  tagId     Int
+
+  company Company @relation(fields: [companyId], references: [id])
+  tag     Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([companyId, tagId])
+  @@index([tagId])
+}
+
+/// Names of custom fields from imports. Values live in Company/Person.customFields.
+model CustomField {
+  id        Int      @id @default(autoincrement())
+  key       String   @unique
+  label     String
+  entity    String // "COMPANY" | "PERSON"
+  createdAt DateTime @default(now())
+}
+
+model Suppression {
+  id                Int               @id @default(autoincrement())
+  emailNorm         String            @unique
+  reason            SuppressionReason
+  source            String // "webhook" | "mailgun-sync" | "manual" | "verification"
+  detail            String?
+  createdAt         DateTime          @default(now())
+  pushedToMailgunAt DateTime?
+}
+
+model VerificationCheck {
+  id        Int                @id @default(autoincrement())
+  personId  Int?
+  emailNorm String
+  provider  String
+  status    VerificationStatus
+  risk      Risk
+  isRole       Boolean @default(false)
+  isDisposable Boolean @default(false)
+  didYouMean   String?
+  reasons   Json?
+  raw       Json?
+  costUsd   Float?
+  jobId     Int?
+  /// Where the check was started: "wizard" | "contacts" | "list" | "panel" | "settings" | "recheck".
+  source    String?
+  checkedAt DateTime           @default(now())
+
+  @@index([emailNorm, checkedAt])
+  @@index([personId, checkedAt])
+  @@index([jobId])
+  @@index([checkedAt])
+}
+
+// ─────────────────────── Templates and campaigns ───────────────────────
+
+model Template {
+  id          Int      @id @default(autoincrement())
+  name        String
+  isMaster    Boolean  @default(false)
+  createdById Int?
+  updatedById Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  steps TemplateStep[]
+}
+
+model TemplateStep {
+  id         Int     @id @default(autoincrement())
+  templateId Int
+  step       Int // 0 = first email, 1..3 = follow-ups
+  enabled    Boolean @default(true)
+  subject    String?
+  body       String
+  delayDays  Int     @default(0)
+
+  template Template @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@unique([templateId, step])
+}
+
+model Campaign {
+  id               Int            @id @default(autoincrement())
+  name             String
+  status           CampaignStatus @default(DRAFT)
+  wizardStep       Int            @default(1)
+  mode             SendMode?
+  senderId         Int?
+  fromName         String?
+  /// The From address at launch (bare): the sender's own address in per-person mode, the shared From address
+  /// (Setting "mailgun.fromAddress") in shared-From mode (SHARED-FROM-DESIGN §2.3).
+  fromAddress      String?
+  /// Shared-From mode: the sender's own address on the sending domain at launch, sent as Reply-To; the reply-route
+  /// hold is keyed by it. Null = per-person mode (replies go to fromAddress).
+  replyTo          String?
+  sendingDomainId  Int?
+  ignoreWindow     Boolean        @default(false)
+  daysAsMinutes    Boolean        @default(false)
+  sourceTemplateId Int?
+  audience         Json?
+  createdById      Int
+  startAt          DateTime?
+  launchedAt       DateTime?
+  /// Setting "sending.goLive" at launch (M5-DESIGN §2.8, M6-DESIGN §2.2–§2.3): whether this campaign's LIVE sends count
+  /// as "emailed" or stay test-list only (eligibility at send, the loop, the Mailgun guard), and the test-list
+  /// exception. Set for every launched campaign (the M6 migration filled older launches with false); null only for drafts.
+  launchedGoLive   Boolean?
+  finishedAt       DateTime?
+  pausedAt         DateTime?
+  pauseReason      String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  sender       User?                @relation("CampaignSender", fields: [senderId], references: [id])
+  createdBy    User                 @relation("CampaignCreator", fields: [createdById], references: [id])
+  steps        CampaignStep[]
+  recipients   CampaignRecipient[]
+  outbound     OutboundEmail[]
+  reservations CompanyReservation[]
+
+  @@index([status])
+}
+
+model CampaignStep {
+  id         Int     @id @default(autoincrement())
+  campaignId Int
+  step       Int
+  enabled    Boolean @default(true)
+  subject    String?
+  body       String
+  delayDays  Int     @default(0)
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, step])
+}
+
+model CampaignRecipient {
+  id              Int            @id @default(autoincrement())
+  campaignId      Int
+  companyId       Int
+  personId        Int
+  emailNorm       String
+  included        Boolean        @default(true)
+  exclusionReason String?
+  state           RecipientState @default(PENDING)
+  stopReason      String?
+  currentStep     Int            @default(0)
+  nextDueAt       DateTime?
+  /// While HELD: why, sorted and comma-joined: "outage", "possible-reply" or "outage,possible-reply" (M4-DESIGN §2.8).
+  /// Meaningless unless state = HELD; cleared on every move out of HELD.
+  holdReason      String?
+  /// When the current hold started.
+  heldAt          DateTime?
+  /// The InboundMessage whose reply stopped this recipient (M4-DESIGN §2.6), for a later "undo a real reply".
+  stoppedByInboundId Int?
+  /// RECHECK: when the second check of an "unknown" address is due (M5-DESIGN §2.7). Kept after the re-check, so a
+  /// second "unknown" leaves the recipient out instead of waiting again.
+  recheckAt       DateTime?
+  hasEdits        Boolean        @default(false)
+  warnings        Json?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  campaign Campaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  company  Company         @relation(fields: [companyId], references: [id])
+  person   Person          @relation(fields: [personId], references: [id])
+  edits    RecipientEdit[]
+  outbound OutboundEmail[]
+
+  @@unique([campaignId, personId])
+  @@unique([campaignId, emailNorm])
+  @@index([companyId, state])
+  @@index([state, nextDueAt])
+  @@index([state, recheckAt])
+}
+
+model RecipientEdit {
+  id          Int      @id @default(autoincrement())
+  recipientId Int
+  step        Int
+  subject     String?
+  body        String
+  editedById  Int?
+  editedAt    DateTime @default(now())
+
+  recipient CampaignRecipient @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+
+  @@unique([recipientId, step])
+}
+
+model CompanyReservation {
+  id         Int       @id @default(autoincrement())
+  companyId  Int
+  campaignId Int
+  reservedAt DateTime  @default(now())
+  releasedAt DateTime?
+  expiresAt  DateTime?
+
+  company  Company  @relation(fields: [companyId], references: [id])
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, releasedAt])
+  @@index([campaignId])
+}
+
+/// One row per email per step. Unique on (campaign, step, address).
+model OutboundEmail {
+  id             Int        @id @default(autoincrement())
+  campaignId     Int
+  recipientId    Int
+  personId       Int?
+  companyId      Int?
+  senderId       Int?
+  step           Int
+  mode           SendMode
+  toEmail        String
+  toNorm         String
+  companyDomain  String?
+  companyName    String
+  fromAddress    String
+  /// The Reply-To sent with this email (copied to follow-ups and to rows the restore scan re-creates). Null = none:
+  /// replies go to the From address. The Mailgun domain is the domain of replyTo ?? the From address.
+  replyTo        String?
+  subject        String
+  text           String
+  html           String
+  messageId      String     @unique // without angle brackets, lowercase
+  sendId         String     @unique
+  inReplyTo      String?
+  references     String?
+  dueAt          DateTime
+  status         SendStatus @default(QUEUED)
+  claimedAt      DateTime?
+  attempts       Int        @default(0)
+  lastError      String?
+  sentAt         DateTime?
+  providerId     String?
+  deliveredAt    DateTime?
+  tempFailedAt   DateTime?
+  bouncedAt      DateTime?
+  complainedAt   DateTime?
+  unsubscribedAt DateTime?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  campaign  Campaign          @relation(fields: [campaignId], references: [id])
+  recipient CampaignRecipient @relation(fields: [recipientId], references: [id])
+  sender    User?             @relation(fields: [senderId], references: [id])
+
+  @@unique([campaignId, step, toNorm])
+  @@index([status, dueAt])
+  @@index([companyId, sentAt])
+  @@index([toNorm, sentAt])
+  @@index([companyDomain, sentAt])
+  @@index([campaignId, step, status])
+  @@index([recipientId, step])
+  @@index([sentAt])
+  /// Events may carry Mailgun's own id when it rewrote ours (§4.4.2 matching order).
+  @@index([providerId])
+}
+
+model TestSend {
+  id          Int        @id @default(autoincrement())
+  userId      Int
+  to          String
+  subject     String
+  mode        SendMode
+  recipientId Int?
+  providerId  String?
+  sentAt      DateTime   @default(now())
+  /// "SELF" = "Send me a test" to the user's own reply inbox; "REPLY_TEST" = the reply test to a test-list mailbox.
+  purpose     String     @default("SELF")
+  /// The shared From address this test email showed (Setting "mailgun.fromAddress" when it was sent); null = per-person
+  /// mode (the From was the sender's own address). The reply test counts only emails of today's From (SHARED-FROM-DESIGN F26).
+  teamFrom    String?
+  /// Our Message-ID (lowercase, no angle brackets), so Mailgun events and replies can be matched to the test.
+  messageId   String?    @unique
+  status      SendStatus @default(SENT)
+  error       String?
+
+  @@index([userId, sentAt])
+}
+
+/// Live sends found in Mailgun logs with no matching row (e.g. after a restore).
+model ExternalSend {
+  id                Int      @id @default(autoincrement())
+  toNorm            String
+  companyDomain     String?
+  companyId         Int?
+  sentAt            DateTime
+  providerMessageId String?
+  source            String
+  createdAt         DateTime @default(now())
+
+  @@index([toNorm, sentAt])
+  @@index([companyDomain, sentAt])
+  @@index([companyId, sentAt])
+}
+
+// ─────────────────────── Mail events and replies ───────────────────────
+
+model MailEvent {
+  id              Int         @id @default(autoincrement())
+  dedupeKey       String      @unique
+  type            String
+  severity        String?
+  reason          String?
+  occurredAt      DateTime
+  messageId       String?
+  recipient       String?
+  outboundEmailId Int?
+  /// The TestSend ("Send me a test" or reply test) this event belongs to, when it matched one.
+  testSendId      Int?
+  isTestMode      Boolean     @default(false)
+  source          EventSource
+  raw             Json
+  stopAppliedAt   DateTime?
+  processedAt     DateTime?
+  createdAt       DateTime    @default(now())
+
+  @@index([processedAt])
+  @@index([messageId])
+  @@index([recipient])
+  @@index([outboundEmailId])
+  @@index([testSendId])
+}
+
+model WebhookToken {
+  token      String   @id
+  receivedAt DateTime @default(now())
+
+  @@index([receivedAt])
+}
+
+model InboundMessage {
+  id              Int           @id @default(autoincrement())
+  storageKey      String?       @unique
+  messageIdHeader String?
+  receivedAt      DateTime
+  toAddress       String
+  senderAddressId Int?
+  fromEmail       String
+  fromName        String?
+  subject         String        @default("")
+  snippet         String        @default("")
+  inReplyTo       String?
+  references      String?
+  headers         Json?
+  /// SMTP MAIL FROM as Mailgun reported it: "" = the null sender <>; null = not known (rows stored before M4).
+  envelopeSender  String?
+  /// Mailgun's stripped-text (the new text), newlines kept, at most 8,000 characters.
+  strippedText    String?
+  /// Mailgun's body-plain, newlines kept, at most 16,000 characters.
+  bodyText        String?
+  /// false: recovered from Mailgun's log after the stored message expired (no text at all).
+  bodyAvailable   Boolean       @default(true)
+  kind            InboundKind?
+  autoReason      String?
+  /// The classifier's signals (JSON array of strings), for the "why" line and tests.
+  signals         Json?
+  /// How it was linked: "headers" | "body-id" | "from" | "person" | "bounce-address" | "named-address" | "manual" | "simulated".
+  linkMethod      String?
+  /// Which recipients it may change, fixed when processed (M4-DESIGN §3.6): "real" | "campaign" | "none".
+  replyScope      String?
+  /// Whether it may set the company Replied and repliedAt (fixed when processed, §3.6).
+  changesStatus   Boolean?
+  /// UNLINKED only: the company held because the sender's address is on its domain (M4-DESIGN §3.3.4).
+  heldCompanyId   Int?
+  outboundEmailId Int?
+  personId        Int?
+  companyId       Int?
+  campaignId      Int?
+  /// Who should answer it (M4-DESIGN §4.2): the campaign's sender while active, else the Owner.
+  assigneeId      Int?
+  answeredAt      DateTime?
+  answeredById    Int?
+  /// "answered" | "not-needed" | "duplicate" (a twin of a message already processed) | "spam" (unlinked, marked by Mailgun).
+  answerOutcome   String?
+  confirmedAt     DateTime?
+  confirmedById   Int?
+  source          InboundSource
+  processedAt     DateTime?
+  createdAt       DateTime      @default(now())
+
+  @@index([processedAt])
+  @@index([companyId])
+  @@index([fromEmail])
+  @@index([messageIdHeader])
+  @@index([assigneeId, answeredAt])
+  @@index([kind, answeredAt])
+  @@index([campaignId, kind])
+}
+
+// ─────────────────────── Activity and notifications ───────────────────────
+
+model ActivityLog {
+  id         Int       @id @default(autoincrement())
+  at         DateTime  @default(now())
+  actorId    Int?
+  companyId  Int?
+  personId   Int?
+  campaignId Int?
+  type       String
+  summary    String
+  data       Json?
+  mode       SendMode?
+
+  actor User? @relation(fields: [actorId], references: [id])
+
+  @@index([companyId, at])
+  @@index([personId, at])
+  @@index([at])
+  @@index([actorId, at])
+}
+
+model Notification {
+  id        Int       @id @default(autoincrement())
+  userId    Int
+  type      String
+  title     String
+  body      String?
+  link      String?
+  createdAt DateTime  @default(now())
+  readAt    DateTime?
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, readAt])
+  @@index([userId, createdAt])
+}
+
+// ─────────────────────── Background work ───────────────────────
+
+model Job {
+  id              Int       @id @default(autoincrement())
+  type            String
+  payload         Json?
+  status          JobStatus @default(QUEUED)
+  runAt           DateTime  @default(now())
+  priority        Int       @default(0)
+  attempts        Int       @default(0)
+  maxAttempts     Int       @default(3)
+  lockedAt        DateTime?
+  lockedBy        String?
+  activeDedupeKey String?   @unique // set while QUEUED/RUNNING, cleared when finished
+  progressDone    Int       @default(0)
+  progressTotal   Int       @default(0)
+  result          Json?
+  error           String?
+  /// Someone clicked Stop while it ran (M5-DESIGN §8 P4); the handler stops at its next safe point.
+  cancelRequestedAt DateTime?
+  createdById     Int?
+  createdAt       DateTime  @default(now())
+  startedAt       DateTime?
+  finishedAt      DateTime?
+
+  @@index([status, runAt, priority])
+  @@index([type, status])
+}
+
+model WorkerLease {
+  id          Int      @id
+  workerId    String
+  heartbeatAt DateTime
+  startedAt   DateTime
+}
+
+model SyncCursor {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+model Backup {
+  id        Int        @id @default(autoincrement())
+  fileName  String     @unique
+  createdAt DateTime   @default(now())
+  sizeBytes Int
+  kind      BackupKind
+  copiedTo  String?
+}
+
+model AiDraft {
+  id             Int           @id @default(autoincrement())
+  companyId      Int
+  jobId          Int?
+  /// Who started the run (jobs are deleted after 30 days).
+  createdById    Int?
+  model          String
+  promptVersion  String
+  status         AiDraftStatus @default(QUEUED)
+  /// Interrupted reads of this draft: a finished read or a requeue from FETCHING gives the claim back, so only reads
+  /// that never ended count; resetStuckDrafts fails the draft at 2 (M5-DESIGN §3.4.9, §12.3 DATA-05).
+  readAttempts   Int           @default(0)
+  line           String?
+  evidenceQuote  String?
+  evidenceSource String?
+  evidenceUrl    String?
+  flags          Json?
+  reasonIfNull   String?
+  inputTokens    Int?
+  outputTokens   Int?
+  costUsd        Float?
+  requestId      String?
+  /// Claude calls for this draft (tokens and cost are their sums, written by recordCall and never reset); stop_reason of the last one.
+  calls          Int           @default(0)
+  stopReason     String?
+  /// When the last Claude call ended: monthly spend is counted by this (M5-DESIGN §3.3).
+  draftedAt      DateTime?
+  homeSnapshotId Int?
+  pageSnapshotId Int?
+  /// Lines Claude was asked not to repeat (JSON array of strings), and whether the website is read again.
+  avoidLines     Json?
+  refetch        Boolean       @default(false)
+  reviewedById   Int?
+  reviewedAt     DateTime?
+  finalLine      String?
+  /// "approved" | "edited" | "rejected" | "regenerated" | "retried" | "undone".
+  reviewAction   String?
+  /// The company's line before this draft was approved (Undo, M5-DESIGN §3.9).
+  prevLine            String?
+  prevLineSource      String?
+  prevLineUpdatedAt   DateTime?
+  prevLineUpdatedById Int?
+  error          String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([status])
+  @@index([companyId])
+  @@index([status, createdAt])
+  @@index([draftedAt])
+  @@index([jobId])
+}
+
+model WebsiteSnapshot {
+  id         Int      @id @default(autoincrement())
+  companyId  Int
+  url        String
+  finalUrl   String?
+  pageKind   String // "homepage" | "second_page"
+  httpStatus Int?
+  title       String?
+  contentType String?
+  bytes       Int?
+  /// Page notes kept for reuse: JSON array of "metadata-only" | "hidden-text" (M5-DESIGN §3.4.9).
+  notes       Json?
+  text       String
+  chars      Int
+  lang       String?
+  fetchedAt  DateTime @default(now())
+  skipReason String?
+
+  @@index([companyId, fetchedAt])
+}
+
+model RobotsCache {
+  host      String   @id
+  status    Int
+  body      String
+  fetchedAt DateTime @default(now())
+}
+
+model ImportSession {
+  id          Int          @id @default(autoincrement())
+  createdById Int
+  fileName    String
+  kind        String // "xlsx" | "xls" | "csv" | "paste"
+  status      ImportStatus @default(UPLOADED)
+  sheetNames  Json?
+  sheet       String?
+  headers     Json
+  mapping     Json?
+  options     Json?
+  rowCount    Int          @default(0)
+  summary     Json?
+  jobId       Int?
+  createdAt   DateTime     @default(now())
+  committedAt DateTime?
+
+  createdBy User        @relation(fields: [createdById], references: [id])
+  rows      ImportRow[]
+}
+
+model ImportRow {
+  id        Int     @id @default(autoincrement())
+  sessionId Int
+  rowNumber Int
+  data      Json
+  status    String  @default("PENDING") // PENDING CREATED UPDATED FILLED SKIPPED INVALID EMPTY PROBLEM
+  message   String?
+  companyId Int?
+  personId  Int?
+
+  session ImportSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, rowNumber])
+  @@index([sessionId, status])
+}

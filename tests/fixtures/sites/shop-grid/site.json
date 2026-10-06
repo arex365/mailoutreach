@@ -1,0 +1,9 @@
+{
+  "origin": "https://www.gridshop.example",
+  "pages": {
+    "/robots.txt": { "status": 200, "contentType": "text/plain", "file": "robots.txt" },
+    "/": { "status": 200, "contentType": "text/html; charset=utf-8", "file": "index.html" },
+    "/collections/all": { "status": 200, "contentType": "text/html; charset=utf-8", "file": "collections-all.html" },
+    "/pages/about": { "status": 200, "contentType": "text/html; charset=utf-8", "file": "about.html" }
+  }
+}

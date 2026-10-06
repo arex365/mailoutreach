@@ -1,0 +1,7 @@
+{
+  "origin": "https://redirect-private.example",
+  "pages": {},
+  "redirects": {
+    "/": { "to": "http://169.254.169.254/latest/meta-data", "status": 302 }
+  }
+}
